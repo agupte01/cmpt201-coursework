@@ -1,0 +1,61 @@
+#define _POSIX_C_SOURCE 200809L
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define H_SIZE 5
+
+void add_history(char *history[], int *count, int *start, char *input) {
+  size_t len = strlen(input);
+  if (len > 0 && input[len - 1] == '\n') {
+    input[len - 1] = '\0';
+  }
+  if (*count == H_SIZE) {
+    free(history[*start]);
+    history [*start] = strdup(input);
+    *start = (*start + 1) % H_SIZE;
+  } else {
+    history[(*start + *count) % H_SIZE] = strdup(input);
+    (*count)++;
+  }
+}
+
+void print_history(char *history[], int count, int start) {
+  for (int i = 0; i < count; i++) {
+    printf("%s\n" , history[(start + i) % H_SIZE]);
+    
+  }
+}
+
+void free_history(char *history[], int count, int start) {
+  for (int i = 0; i < count; i++) {
+    free(history[(start + i) % H_SIZE]);
+  }
+}
+
+int main() {
+  char *history[H_SIZE] = {NULL};
+  int count = 0;
+  int start = 0;
+  char *line = NULL;
+  size_t len = 0;
+
+  while (1) {
+    printf("Enter input: ");
+    fflush(stdout);
+
+    if (getline(&line, &len, stdin) == -1)
+      break;
+
+    if (strcmp(line, "print\n") == 0 || strcmp(line, "print") == 0) {
+      add_history(history, &count, &start, line);
+      print_history(history, count, start);
+    } else {
+      add_history(history, &count, &start, line);
+    }
+  }
+  free(line);
+  free_history(history, count, start);
+  return 0;
+}
