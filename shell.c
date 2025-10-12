@@ -17,6 +17,8 @@
 char history[HISTORY_MAX][CMDLEN_MAX];
 int history_count = 0;
 int history_start = 0;
+char prev_dir[PATH_MAX] = "";
+int total_commands = 0;
 
 void add_history(const char *cmdline) {
 
@@ -38,6 +40,7 @@ void add_history(const char *cmdline) {
     history[history_start][CMDLEN_MAX - 1] = '\0';
     history_start = (history_start + 1) % HISTORY_MAX;
   }
+  total_commands++;
 }
 
 void display_prompt() {
@@ -61,12 +64,12 @@ ssize_t read_line(char *buffer, size_t size) {
 
 void parse_and_exec(char *line) {
   // fprintf(stderr, "DEBUG: [%s]\n", line ? line : "(null)");
-  char *temp = line;
-  while (temp && *temp) {
-    fprintf(stderr, "%02x ", (unsigned char)*temp);
-    temp++;
-  }
-  fprintf(stderr, "\n");
+  // char *temp = line;
+  // while (temp && *temp) {
+  // fprintf(stderr, "%02x ", (unsigned char)*temp);
+  // temp++;
+  //}
+  // fprintf(stderr, "\n");
 
   char *argv[128];
   int argc = 0;
@@ -110,7 +113,7 @@ void parse_and_exec(char *line) {
 
   if (strcmp(argv[0], "pwd") == 0) {
     if (argc > 1) {
-      const char *msg = FORMAT_MSG("pwd", "too many arguments"); // TMA_MSG);
+      const char *msg = FORMAT_MSG("pwd", TMA_MSG);
       write(STDERR_FILENO, msg, strlen(msg));
       return;
     }
@@ -131,12 +134,23 @@ void parse_and_exec(char *line) {
 
     if (argc > 2) {
       WRITE_OUT(STDOUT_FILENO, FORMAT_MSG("cd", TMA_MSG));
+      return;
+    }
+
+    char current[PATH_MAX];
+    if (getcwd(current, sizeof(current)) == NULL) {
+      WRITE_OUT(STDERR_FILENO, FORMAT_MSG("cd", GETCWD_ERROR_MSG));
     }
 
     const char *path = NULL;
     char buf[PATH_MAX];
-
-    if (argc == 1 || (argc == 2 && strcmp(argv[1], "~") == 0)) {
+    if (argc == 2 && strcmp(argv[1], "-") == 0) {
+      if (strlen(prev_dir) == 0) {
+        WRITE_OUT(STDERR_FILENO, FORMAT_MSG("cd", CHDIR_ERROR_MSG));
+        return;
+      }
+      path = prev_dir;
+    } else if (argc == 1 || (argc == 2 && strcmp(argv[1], "~") == 0)) {
       struct passwd *pw = getpwuid(getuid());
       if (pw && pw->pw_dir)
         path = pw->pw_dir;
@@ -157,6 +171,9 @@ void parse_and_exec(char *line) {
 
     if (path == NULL || chdir(path) != 0) {
       WRITE_OUT(STDERR_FILENO, FORMAT_MSG("cd", CHDIR_ERROR_MSG));
+    } else {
+      strncpy(prev_dir, current, PATH_MAX - 1);
+      prev_dir[PATH_MAX - 1] = '\0';
     }
     return;
   }
@@ -167,8 +184,8 @@ void parse_and_exec(char *line) {
       return;
     }
     int total = (history_count < HISTORY_MAX) ? history_count : HISTORY_MAX;
-    int start_num =
-        history_count + (history_count >= HISTORY_MAX ? history_start : 0) - 1;
+    int start_num = total_commands - 1;
+    // history_count + (history_count >= HISTORY_MAX ? history_start : 0) - 1;
     for (int i = 0; i < total; ++i) {
       int x = (history_start + total - i - 1) % HISTORY_MAX;
       int cmd_num = start_num - i;
@@ -207,8 +224,13 @@ void parse_and_exec(char *line) {
       WRITE_OUT(STDOUT_FILENO, FORMAT_MSG("cd", CD_HELP_MSG));
     else if (strcmp(cmd, "help") == 0)
       WRITE_OUT(STDOUT_FILENO, FORMAT_MSG("help", HELP_HELP_MSG));
-    else
-      WRITE_OUT(STDOUT_FILENO, FORMAT_MSG("ls", EXTERN_HELP_MSG));
+    else {
+      char extbuf[128 + CMDLEN_MAX];
+      snprintf(extbuf, sizeof(extbuf), "%s: %s\n", cmd, EXTERN_HELP_MSG);
+      write(STDOUT_FILENO, extbuf, strlen(extbuf));
+
+      // WRITE_OUT(STDOUT_FILENO, FORMAT_MSG(cmd, EXTERN_HELP_MSG));
+    }
     return;
   }
 
@@ -234,13 +256,20 @@ void parse_and_exec(char *line) {
 }
 
 void sigint_help(int signo) {
+  (void)signo;
   WRITE_OUT(STDOUT_FILENO, FORMAT_MSG("exit", EXIT_HELP_MSG));
   WRITE_OUT(STDOUT_FILENO, FORMAT_MSG("pwd", PWD_HELP_MSG));
   WRITE_OUT(STDOUT_FILENO, FORMAT_MSG("cd", CD_HELP_MSG));
   WRITE_OUT(STDOUT_FILENO, FORMAT_MSG("help", HELP_HELP_MSG));
   WRITE_OUT(STDOUT_FILENO, FORMAT_MSG("history", HISTORY_HELP_MSG));
-  WRITE_OUT(STDOUT_FILENO, "\n");
-  WRITE_OUT(STDOUT_FILENO, "$ ");
+  // WRITE_OUT(STDOUT_FILENO, "\n");
+  // WRITE_OUT(STDOUT_FILENO, "$ ");
+
+  char cwd[PATH_MAX];
+  if (getcwd(cwd, sizeof(cwd)) != NULL) {
+    write(STDOUT_FILENO, cwd, strlen(cwd));
+    WRITE_OUT(STDOUT_FILENO, "$ ");
+  }
 }
 
 int main() {
@@ -309,7 +338,6 @@ int main() {
           temp[CMDLEN_MAX - 1] = '\0';
           WRITE_OUT(STDOUT_FILENO, temp);
           WRITE_OUT(STDOUT_FILENO, "\n");
-          ;
           add_history(temp);
           parse_and_exec(temp);
           break;
