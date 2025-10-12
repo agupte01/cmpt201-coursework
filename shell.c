@@ -294,11 +294,12 @@ int main() {
       WRITE_OUT(STDOUT_FILENO, "\n");
       break;
     }
-    if (strcmp(buffer, "!!") == 0) {
+    if (strcmp(buffer, "!!\n") == 0 || strcmp(buffer, "!!") == 0) {
       if (history_count == 0) {
         WRITE_OUT(STDERR_FILENO, FORMAT_MSG("history", HISTORY_NO_LAST_MSG));
         continue;
       }
+      /*
       char *cmd_ptr = NULL;
       int last = (history_start + history_count - 1) % HISTORY_MAX;
       while (last != history_start && strcmp(history[last], "!!") == 0) {
@@ -313,6 +314,14 @@ int main() {
       WRITE_OUT(STDOUT_FILENO, "\n");
       add_history(cmd_ptr);
       parse_and_exec(cmd_ptr);
+      continue;
+      */
+      int last_index = (history_start + history_count - 1) % HISTORY_MAX;
+      char *cmd = history[last_index];
+      WRITE_OUT(STDOUT_FILENO, cmd);
+      WRITE_OUT(STDOUT_FILENO, "\n");
+      add_history(cmd);
+      parse_and_exec(cmd);
       continue;
     }
 
@@ -343,6 +352,7 @@ int main() {
           break;
         }
       }
+
       if (!found) {
         WRITE_OUT(STDERR_FILENO, FORMAT_MSG("history", HISTORY_INVALID_MSG));
       }
