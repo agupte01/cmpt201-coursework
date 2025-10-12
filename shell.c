@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "msgs.h"
+#include <errno.h>
 #include <limits.h>
 #include <pwd.h>
 #include <stdio.h>
@@ -29,11 +30,11 @@ void add_history(const char *cmdline) {
 
   int x = (history_start + history_count) % HISTORY_MAX;
   if (history_count < HISTORY_MAX) {
-    strncpy(history[x], cmdline, CMDLEN_MAX - 1);
+    strncpy(history[x], clean, CMDLEN_MAX - 1);
     history[x][CMDLEN_MAX - 1] = '\0';
     history_count++;
   } else {
-    strncpy(history[history_start], cmdline, CMDLEN_MAX - 1);
+    strncpy(history[history_start], clean, CMDLEN_MAX - 1);
     history[history_start][CMDLEN_MAX - 1] = '\0';
     history_start = (history_start + 1) % HISTORY_MAX;
   }
@@ -44,7 +45,7 @@ void display_prompt() {
   char cwd[PATH_MAX];
   if (getcwd(cwd, sizeof(cwd)) != NULL) {
     write(STDOUT_FILENO, cwd, strlen(cwd));
-    WRITE_OUT(STDOUT_FILENO, "$");
+    WRITE_OUT(STDOUT_FILENO, "$ ");
   } else {
     WRITE_OUT(STDERR_FILENO, "shell: unable to get directory\n");
   }
@@ -59,13 +60,21 @@ ssize_t read_line(char *buffer, size_t size) {
 }
 
 void parse_and_exec(char *line) {
+  // fprintf(stderr, "DEBUG: [%s]\n", line ? line : "(null)");
+  char *temp = line;
+  while (temp && *temp) {
+    fprintf(stderr, "%02x ", (unsigned char)*temp);
+    temp++;
+  }
+  fprintf(stderr, "\n");
+
   char *argv[128];
   int argc = 0;
   char *saveptr;
-  char *token = strtok_r(line, "\t\n", &saveptr);
+  char *token = strtok_r(line, " \t\n", &saveptr);
   while (token && argc < 127) {
     argv[argc++] = token;
-    token = strtok_r(NULL, "\t\n", &saveptr);
+    token = strtok_r(NULL, " \t\n", &saveptr);
   }
   argv[argc] = NULL;
 
@@ -101,14 +110,15 @@ void parse_and_exec(char *line) {
 
   if (strcmp(argv[0], "pwd") == 0) {
     if (argc > 1) {
-      const char *msg = FORMAT_MSG("pwd", TMA_MSG);
+      const char *msg = FORMAT_MSG("pwd", "too many arguments"); // TMA_MSG);
       write(STDERR_FILENO, msg, strlen(msg));
       return;
     }
 
     char cwd[PATH_MAX];
     if (getcwd(cwd, sizeof(cwd)) == NULL) {
-      const char *msg = FORMAT_MSG("pwd", GETCWD_ERROR_MSG);
+      const char *msg =
+          FORMAT_MSG("pwd", "too many arguments"); // GETCWD_ERROR_MSG);
       write(STDERR_FILENO, msg, strlen(msg));
       return;
     }
@@ -211,8 +221,8 @@ void parse_and_exec(char *line) {
 
   if (pid == 0) {
     execvp(argv[0], argv);
-    WRITE_OUT(STDERR_FILENO, "shell: exec failed\n");
-    _exit(1);
+    WRITE_OUT(STDERR_FILENO, FORMAT_MSG("shell", EXEC_ERROR_MSG));
+    _exit(127);
   } else {
     if (!background) {
       int status;
@@ -230,7 +240,7 @@ void sigint_help(int signo) {
   WRITE_OUT(STDOUT_FILENO, FORMAT_MSG("help", HELP_HELP_MSG));
   WRITE_OUT(STDOUT_FILENO, FORMAT_MSG("history", HISTORY_HELP_MSG));
   WRITE_OUT(STDOUT_FILENO, "\n");
-  WRITE_OUT(STDOUT_FILENO, "$");
+  WRITE_OUT(STDOUT_FILENO, "$ ");
 }
 
 int main() {
@@ -260,33 +270,23 @@ int main() {
         WRITE_OUT(STDERR_FILENO, FORMAT_MSG("history", HISTORY_NO_LAST_MSG));
         continue;
       }
-      int found = 0;
-      int start_num = history_count +
-                      (history_count >= HISTORY_MAX ? history_start : 0) - 1;
-      for (int i = 0; i < history_count; ++i) {
-        int cmd_x = (history_start + i) % HISTORY_MAX;
-        int cmd_num = start_num - (history_count - 1) + i;
-        if (cmd_num == start_num) {
-          found = 1;
-          char temp[CMDLEN_MAX];
-          strncpy(temp, history[cmd_x], CMDLEN_MAX - 1);
-          temp[CMDLEN_MAX - 1] = '\0';
-          WRITE_OUT(STDOUT_FILENO, temp);
-          WRITE_OUT(STDOUT_FILENO, "\n");
-          add_history(temp);
-          fprintf(stderr, "!! debug::");
-          for (int i = 0; temp[i] != '\0'; i++) {
-            fprintf(stderr, "%02x ", (unsigned char)temp[i]);
-          }
-          fprintf(stderr, "\n");
-          parse_and_exec(temp);
-          break;
-        }
+      char *cmd_ptr = NULL;
+      int last = (history_start + history_count - 1) % HISTORY_MAX;
+      while (last != history_start && strcmp(history[last], "!!") == 0) {
+        last = (last - 1 + HISTORY_MAX) % HISTORY_MAX;
       }
-      if (!found) {
+      cmd_ptr = history[last];
+      if (!cmd_ptr || strlen(cmd_ptr) == 0 || strcmp(cmd_ptr, "!!") == 0) {
         WRITE_OUT(STDERR_FILENO, FORMAT_MSG("history", HISTORY_NO_LAST_MSG));
+        continue;
       }
+      WRITE_OUT(STDOUT_FILENO, cmd_ptr);
+      WRITE_OUT(STDOUT_FILENO, "\n");
+      add_history(cmd_ptr);
+      parse_and_exec(cmd_ptr);
+      continue;
     }
+
     if (buffer[0] == '!' && buffer[1] != '!' && buffer[1] != '\n') {
       char *numstr = buffer + 1;
       char *endptr;
@@ -320,8 +320,10 @@ int main() {
       }
       continue;
     }
-    add_history(buffer);
-    parse_and_exec(buffer);
+    if (strcmp(buffer, "!!") != 0) {
+      add_history(buffer);
+      parse_and_exec(buffer);
+    }
   }
   return 0;
 }
