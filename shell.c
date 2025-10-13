@@ -317,11 +317,16 @@ int main() {
       continue;
       */
       int last_index = (history_start + history_count - 1) % HISTORY_MAX;
-      char *cmd = history[last_index];
-      WRITE_OUT(STDOUT_FILENO, cmd);
+      // char *cmd = history[last_index];
+
+      char temp[CMDLEN_MAX];
+      strncpy(temp, history[last_index], CMDLEN_MAX - 1);
+      temp[CMDLEN_MAX - 1] = '\0';
+
+      WRITE_OUT(STDOUT_FILENO, temp);
       WRITE_OUT(STDOUT_FILENO, "\n");
-      add_history(cmd);
-      parse_and_exec(cmd);
+      add_history(temp);
+      parse_and_exec(temp);
       continue;
     }
 
