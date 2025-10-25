@@ -65,6 +65,8 @@ void *alloc(int size) {
       prev = curr;
       curr = curr->next;
     }
+    curr = best;
+    prev = best_prev;
   } else if (alloc_algo == WORST_FIT) {
 
     uint64_t worst_size = 0;
@@ -82,7 +84,7 @@ void *alloc(int size) {
     prev = best_prev;
   }
 
-  while (curr) {
+  if (curr) {
     if (curr->size >= size + sizeof(struct header) + 8) {
 
       struct header *new_block =
@@ -115,8 +117,27 @@ void *alloc(int size) {
 
     struct header *new_header = (struct header *)new_block;
     new_header->size = INCREMENT;
-    new_header->next = free_list;
-    free_list = new_header;
+
+    struct header *p = free_list, *q = NULL;
+    while (p && p < new_header) {
+      q = p;
+      p = p->next;
+    }
+    new_header->next = p;
+    if (q)
+      q->next = new_header;
+    else
+      free_list = new_header;
+
+    if (p && (char *)new_header + new_header->size == (char *)p) {
+      new_header->size += p->size;
+      new_header->next = p->next;
+    }
+
+    if (q && (char *)q + q->size == (char *)new_header) {
+      q->size += new_header->size;
+      q->next = new_header->next;
+    }
 
     return alloc(size);
   }
@@ -130,8 +151,28 @@ void dealloc(void *ptr) {
 
   struct header *block = (struct header *)((char *)ptr - sizeof(struct header));
 
-  block->next = free_list;
-  free_list = block;
+  struct header *prev = NULL;
+  struct header *curr = free_list;
+
+  while (curr && curr < block) {
+    prev = curr;
+    curr = curr->next;
+  }
+  block->next = curr;
+  if (prev)
+    prev->next = block;
+  else
+    free_list = block;
+
+  if (curr && (char *)block + block->size == (char *)curr) {
+    block->size += curr->size;
+    block->next = curr->next;
+  }
+
+  if (prev && (char *)prev + prev->size == (char *)block) {
+    prev->size += block->size;
+    prev->next = block->next;
+  }
 }
 
 void allocopt(enum algs algorithm, int limit) {
@@ -144,20 +185,23 @@ struct allocinfo allocinfo(void) {
   info.free_size = 0;
   info.free_chunks = 0;
   info.largest_free_chunk_size = 0;
-  info.smallest_free_chunk_size = 0;
+  info.smallest_free_chunk_size = UINT64_MAX;
 
   struct header *curr = free_list;
   while (curr) {
 
     uint64_t chunk_size = curr->size - sizeof(struct header);
-    info.free_size = chunk_size;
-    info.free_chunks++;
 
-    if (chunk_size > info.largest_free_chunk_size) {
-      info.largest_free_chunk_size = chunk_size;
-    }
-    if (chunk_size < info.smallest_free_chunk_size) {
-      info.smallest_free_chunk_size = chunk_size;
+    if (curr->size >= sizeof(struct header)) {
+      info.free_size += chunk_size;
+      info.free_chunks++;
+
+      if (chunk_size > info.largest_free_chunk_size) {
+        info.largest_free_chunk_size = chunk_size;
+      }
+      if (chunk_size < info.smallest_free_chunk_size) {
+        info.smallest_free_chunk_size = chunk_size;
+      }
     }
 
     curr = curr->next;
