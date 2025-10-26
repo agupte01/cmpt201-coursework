@@ -46,7 +46,7 @@ void *alloc(int size) {
 
   if (alloc_algo == FIRST_FIT) {
     while (curr) {
-      if (curr->size > size + sizeof(struct header) + 8) {
+      if (curr->size >= size + sizeof(struct header)) {
         break;
       }
       prev = curr;
@@ -56,7 +56,7 @@ void *alloc(int size) {
 
     int64_t best_size = UINT64_MAX;
     while (curr) {
-      if (curr->size > size + sizeof(struct header) + 8 &&
+      if (curr->size >= size + sizeof(struct header) &&
           curr->size < best_size) {
         best = curr;
         best_prev = prev;
@@ -71,7 +71,7 @@ void *alloc(int size) {
 
     uint64_t worst_size = 0;
     while (curr) {
-      if (curr->size > size + sizeof(struct header) + 8 &&
+      if (curr->size > size + sizeof(struct header) &&
           curr->size > worst_size) {
         best = curr;
         best_prev = prev;
@@ -85,13 +85,17 @@ void *alloc(int size) {
   }
 
   if (curr) {
-    if (curr->size > size + sizeof(struct header) + 8) {
+    uint64_t need = size + sizeof(struct header);
+    uint64_t remainder = (curr->size > need) ? (curr->size - need) : 0;
+
+    if (remainder >= sizeof(struct header) + 8) {
 
       struct header *new_block =
-          (struct header *)((char *)curr + sizeof(struct header) + size);
-      new_block->size = curr->size - size - sizeof(struct header);
+          (struct header *)((char *)curr +
+                            need); // sizeof(struct header) + size);
+      new_block->size = remainder; // curr->size - size - sizeof(struct header);
       new_block->next = curr->next;
-      curr->size = size + sizeof(struct header);
+      curr->size = need; // size + sizeof(struct header);
       curr->next = NULL;
 
       if (prev)
