@@ -14,11 +14,15 @@ static uint64_t heap_limit = 0;
 static void *heap_start = NULL;
 static uint64_t current_heap_size = 0;
 
-static int align8(int size) { return ((size + 7) / 8) * 8; }
+// static int align8(int size) { return ((size + 7) / 8) * 8; }
+
+static inline uint64_t align8_u64(uint64_t n) { return (n + 7ULL) & ~7ULL; }
 
 void *alloc(int size) {
 
-  size = align8(size);
+  printf("alloc: size=%d aligned=%llu\n", size,
+         (unsigned long long)align8_u64((uint64_t)size));
+  size = (int)align8_u64((uint64_t)size);
 
   if (size <= 0)
     return NULL;
@@ -33,9 +37,10 @@ void *alloc(int size) {
     current_heap_size = INCREMENT;
 
     struct header *first = (struct header *)block;
-    first->size = INCREMENT;
+    first->size = align8_u64((uint64_t)INCREMENT);
     first->next = NULL;
-
+    printf("arena inint: first=%p first->size=%llu\n", (void *)first,
+           (unsigned long long)first->size);
     free_list = first;
   }
 
@@ -85,9 +90,13 @@ void *alloc(int size) {
   }
 
   if (curr) {
-    uint64_t need = size + sizeof(struct header);
+    uint64_t need =
+        align8_u64((uint64_t)size) + (uint64_t)sizeof(struct header);
     uint64_t remainder = (curr->size > need) ? (curr->size - need) : 0;
 
+    printf("alloc: curr=%p curr->size=%llu need=%llu remainder=%llu\n",
+           (void *)curr, (unsigned long long)curr->size,
+           (unsigned long long)need, (unsigned long long)remainder);
     if (remainder >= sizeof(struct header) + 8) {
 
       struct header *new_block =
@@ -120,8 +129,9 @@ void *alloc(int size) {
     current_heap_size += INCREMENT;
 
     struct header *new_header = (struct header *)new_block;
-    new_header->size = INCREMENT;
-
+    new_header->size = align8_u64((uint64_t)INCREMENT);
+    printf("arena grow: new_header=%p new_header->size=%llu\n",
+           (void *)new_header, (unsigned long long)new_header->size);
     struct header *p = free_list, *q = NULL;
     while (p && p < new_header) {
       q = p;
@@ -196,17 +206,17 @@ struct allocinfo allocinfo(void) {
 
     uint64_t chunk_size = curr->size - sizeof(struct header);
 
-    if (curr->size >= sizeof(struct header)) {
-      info.free_size += chunk_size;
-      info.free_chunks++;
+    // if (curr->size >= sizeof(struct header)) {
+    info.free_size += chunk_size;
+    info.free_chunks++;
 
-      if (chunk_size > info.largest_free_chunk_size) {
-        info.largest_free_chunk_size = chunk_size;
-      }
-      if (chunk_size < info.smallest_free_chunk_size) {
-        info.smallest_free_chunk_size = chunk_size;
-      }
+    if (chunk_size > info.largest_free_chunk_size) {
+      info.largest_free_chunk_size = chunk_size;
     }
+    if (chunk_size < info.smallest_free_chunk_size) {
+      info.smallest_free_chunk_size = chunk_size;
+    }
+    //}
 
     curr = curr->next;
   }
