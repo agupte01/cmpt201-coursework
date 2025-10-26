@@ -7,7 +7,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#define MIN_BLOCK_SIZE (sizeof(struct header) + 8)
 void *sbrk(intptr_t increment);
+int brk(void *addr);
 static struct header *free_list = NULL;
 static enum algs alloc_algo = FIRST_FIT;
 static uint64_t heap_limit = 0;
@@ -62,7 +64,7 @@ void *alloc(int size) {
     int64_t best_size = UINT64_MAX;
     while (curr) {
       if (curr->size >= size + sizeof(struct header) &&
-          curr->size < best_size) {
+          curr->size <= best_size) {
         best = curr;
         best_prev = prev;
         best_size = curr->size;
@@ -76,8 +78,8 @@ void *alloc(int size) {
 
     uint64_t worst_size = 0;
     while (curr) {
-      if (curr->size > size + sizeof(struct header) &&
-          curr->size > worst_size) {
+      if (curr->size >= size + sizeof(struct header) &&
+          curr->size >= worst_size) {
         best = curr;
         best_prev = prev;
         worst_size = curr->size;
@@ -97,7 +99,7 @@ void *alloc(int size) {
     printf("alloc: curr=%p curr->size=%llu need=%llu remainder=%llu\n",
            (void *)curr, (unsigned long long)curr->size,
            (unsigned long long)need, (unsigned long long)remainder);
-    if (remainder >= sizeof(struct header) + 8) {
+    if (remainder >= MIN_BLOCK_SIZE) {
 
       struct header *new_block =
           (struct header *)((char *)curr +
@@ -132,32 +134,60 @@ void *alloc(int size) {
     new_header->size = align8_u64((uint64_t)INCREMENT);
     printf("arena grow: new_header=%p new_header->size=%llu\n",
            (void *)new_header, (unsigned long long)new_header->size);
-    struct header *p = free_list, *q = NULL;
-    while (p && p < new_header) {
-      q = p;
-      p = p->next;
+    new_header->next = NULL;
+
+    struct header *prev = NULL;
+    struct header *curr = free_list;
+    while (curr && curr < new_header) {
+      prev = curr;
+      curr = curr->next;
     }
-    new_header->next = p;
-    if (q)
-      q->next = new_header;
+    new_header->next = curr;
+    if (prev)
+      prev->next = new_header;
     else
       free_list = new_header;
 
-    if (p && (char *)new_header + new_header->size == (char *)p) {
-      new_header->size += p->size;
-      new_header->next = p->next;
+    struct header *p = free_list;
+    while (p && p->next) {
+      if ((char *)p + p->size == (char *)p->next) {
+        p->size += p->next->size;
+        p->next = p->next->next;
+      } else {
+        p = p->next;
+      }
     }
-
-    if (q && (char *)q + q->size == (char *)new_header) {
-      q->size += new_header->size;
-      q->next = new_header->next;
-    }
-
     return alloc(size);
   }
   return NULL;
 }
+/*
+struct header *p = free_list, *q = NULL;
+while (p && p < new_header) {
+  q = p;
+  p = p->next;
+}
+new_header->next = p;
+if (q)
+  q->next = new_header;
+else
+  free_list = new_header;
 
+if (p && (char *)new_header + new_header->size == (char *)p) {
+  new_header->size += p->size;
+  new_header->next = p->next;
+}
+
+if (q && (char *)q + q->size == (char *)new_header) {
+  q->size += new_header->size;
+  q->next = new_header->next;
+}
+
+return alloc(size);
+}
+return NULL;
+}
+*/
 void dealloc(void *ptr) {
 
   if (ptr == NULL)
@@ -192,38 +222,74 @@ void dealloc(void *ptr) {
 void allocopt(enum algs algorithm, int limit) {
   alloc_algo = algorithm;
   heap_limit = limit;
+
+  if (heap_start != NULL) {
+    brk(heap_start);
+    heap_start = NULL;
+  }
+
+  free_list = NULL;
+  current_heap_size = 0;
 }
 
 struct allocinfo allocinfo(void) {
-  struct allocinfo info;
-  info.free_size = 0;
-  info.free_chunks = 0;
-  info.largest_free_chunk_size = 0;
-  info.smallest_free_chunk_size = UINT64_MAX;
-
+  struct allocinfo info = {0, 0, 0, UINT64_MAX};
   struct header *curr = free_list;
+
   while (curr) {
-
-    uint64_t chunk_size = curr->size - sizeof(struct header);
-
-    // if (curr->size >= sizeof(struct header)) {
-    info.free_size += chunk_size;
+    uint64_t usable = (curr->size > sizeof(struct header))
+                          ? curr->size - sizeof(struct header)
+                          : 0;
+    info.free_size += usable;
     info.free_chunks++;
 
-    if (chunk_size > info.largest_free_chunk_size) {
-      info.largest_free_chunk_size = chunk_size;
-    }
-    if (chunk_size < info.smallest_free_chunk_size) {
-      info.smallest_free_chunk_size = chunk_size;
-    }
-    //}
+    if (usable > info.largest_free_chunk_size)
+      info.largest_free_chunk_size = usable;
+    if (usable < info.smallest_free_chunk_size)
+      info.smallest_free_chunk_size = usable;
 
     curr = curr->next;
   }
 
-  if (info.free_chunks == 0) {
+  if (info.free_chunks == 0)
     info.smallest_free_chunk_size = 0;
-  }
+  else if (info.smallest_free_chunk_size == UINT64_MAX)
+    info.smallest_free_chunk_size = 0;
 
   return info;
 }
+
+/*
+struct allocinfo info;
+info.free_size = 0;
+info.free_chunks = 0;
+info.largest_free_chunk_size = 0;
+info.smallest_free_chunk_size = UINT64_MAX;
+
+struct header *curr = free_list;
+while (curr) {
+
+  uint64_t chunk_size = curr->size - sizeof(struct header);
+
+  // if (curr->size >= sizeof(struct header)) {
+  info.free_size += chunk_size;
+  info.free_chunks++;
+
+  if (chunk_size > info.largest_free_chunk_size) {
+    info.largest_free_chunk_size = chunk_size;
+  }
+  if (chunk_size < info.smallest_free_chunk_size) {
+    info.smallest_free_chunk_size = chunk_size;
+  }
+  //}
+
+  curr = curr->next;
+}
+
+if (info.free_chunks == 0) {
+  info.smallest_free_chunk_size = 0;
+}
+
+return info;
+}
+*/
