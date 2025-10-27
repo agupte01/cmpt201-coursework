@@ -22,8 +22,8 @@ static inline uint64_t align8_u64(uint64_t n) { return (n + 7ULL) & ~7ULL; }
 
 void *alloc(int size) {
 
-  // printf("alloc: size=%d aligned=%llu\n", size,
-  //      (unsigned long long)align8_u64((uint64_t)size));
+  printf("alloc: size=%d aligned=%llu\n", size,
+         (unsigned long long)align8_u64((uint64_t)size));
   size = (int)align8_u64((uint64_t)size);
 
   if (size <= 0)
@@ -41,8 +41,8 @@ void *alloc(int size) {
     struct header *first = (struct header *)block;
     first->size = align8_u64((uint64_t)INCREMENT);
     first->next = NULL;
-    // printf("arena inint: first=%p first->size=%llu\n", (void *)first,
-    //      (unsigned long long)first->size);
+    printf("arena inint: first=%p first->size=%llu\n", (void *)first,
+           (unsigned long long)first->size);
     free_list = first;
   }
 
@@ -92,13 +92,13 @@ void *alloc(int size) {
   }
 
   if (curr) {
-    uint64_t need =
-        align8_u64((uint64_t)size) + (uint64_t)sizeof(struct header);
+    uint64_t need = sizeof(struct header) + (uint64_t)size;
+    // align8_u64((uint64_t)size) + (uint64_t)sizeof(struct header);
     uint64_t remainder = (curr->size > need) ? (curr->size - need) : 0;
 
-    // printf("alloc: curr=%p curr->size=%llu need=%llu remainder=%llu\n",
-    //      (void *)curr, (unsigned long long)curr->size,
-    //    (unsigned long long)need, (unsigned long long)remainder);
+    printf("alloc: curr=%p curr->size=%llu need=%llu remainder=%llu\n",
+           (void *)curr, (unsigned long long)curr->size,
+           (unsigned long long)need, (unsigned long long)remainder);
     if (remainder >= MIN_BLOCK_SIZE) {
 
       struct header *new_block =
@@ -131,9 +131,9 @@ void *alloc(int size) {
     current_heap_size += INCREMENT;
 
     struct header *new_header = (struct header *)new_block;
-    new_header->size = align8_u64((uint64_t)INCREMENT);
-    // printf("arena grow: new_header=%p new_header->size=%llu\n",
-    //       (void *)new_header, (unsigned long long)new_header->size);
+    new_header->size = (uint64_t)INCREMENT; // align8_u64((uint64_t)INCREMENT);
+    printf("arena grow: new_header=%p new_header->size=%llu\n",
+           (void *)new_header, (unsigned long long)new_header->size);
     new_header->next = NULL;
 
     struct header *prev = NULL;
@@ -195,9 +195,9 @@ void dealloc(void *ptr) {
 
   struct header *block = (struct header *)((char *)ptr - sizeof(struct header));
 
-  if (block->size < MIN_BLOCK_SIZE) {
-    return;
-  }
+  // if (block->size < MIN_BLOCK_SIZE) {
+  // return;
+  //}
   struct header *prev = NULL;
   struct header *curr = free_list;
 
@@ -245,7 +245,7 @@ struct allocinfo allocinfo(void) {
                           ? curr->size - sizeof(struct header)
                           : 0;
 
-    if (usable < 8) {
+    if (usable == 0) {
       curr = curr->next;
       continue;
     }
