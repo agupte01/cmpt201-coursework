@@ -105,7 +105,11 @@ int compare_kv(const void *a, const void *b) {
   const char *kb = ((const char *)b);
   return strncmp(ka, kb, MAX_KEY_SIZE);
 }
-
+int outcompare(const void *a, const void *b) {
+  const struct mr_out_kv *kvA = a;
+  const struct mr_out_kv *kvB = b;
+  return strcmp(kvA->key, kvB->key);
+}
 int mr_exec(const struct mr_input *input, void (*map)(const struct mr_in_kv *),
             size_t mapper_count, void (*reduce)(const struct mr_out_kv *),
             size_t reducer_count, struct mr_output *output) {
@@ -168,11 +172,15 @@ int mr_exec(const struct mr_input *input, void (*map)(const struct mr_in_kv *),
     groups[group_count].values =
         malloc(groups[group_count].value_count * sizeof(char *));
     for (size_t k = 0; k < groups[group_count].value_count; ++k) {
-      size_t len = strlen(intermediate_buffer[idx + k].value) + 1;
+      groups[group_count].values[k] = malloc(MAX_VALUE_SIZE);
+      strncpy(groups[group_count].values[k], intermediate_buffer[idx + k].value,
+              MAX_VALUE_SIZE);
+      groups[group_count].values[k][MAX_VALUE_SIZE - 1] = '\0';
+      /*size_t len = strlen(intermediate_buffer[idx + k].value) + 1;
       groups[group_count].values[k] = malloc(len);
       strncpy(groups[group_count].values[k], intermediate_buffer[idx + k].value,
               len);
-      ;
+      */
     }
     group_count++;
     idx = j;
@@ -212,13 +220,18 @@ int mr_exec(const struct mr_input *input, void (*map)(const struct mr_in_kv *),
   for (size_t i = 0; i < final_count; ++i) {
     strncpy(output->kv_lst[i].key, final_buffer[i].key, MAX_KEY_SIZE);
     output->kv_lst[i].key[MAX_KEY_SIZE - 1] = '\0';
-    output->kv_lst[i].count = groups[i].value_count;
-    output->kv_lst[i].value = malloc(groups[i].value_count * MAX_VALUE_SIZE);
+    output->kv_lst[i].count = 1; // groups[i].value_count;
+    output->kv_lst[i].value = malloc(MAX_VALUE_SIZE);
+    strncpy(output->kv_lst[i].value[0], final_buffer[i].value, MAX_VALUE_SIZE);
+    output->kv_lst[i].value[0][MAX_VALUE_SIZE - 1] = '\0';
+    /*output->kv_lst[i].value = malloc(groups[i].value_count * MAX_VALUE_SIZE);
     for (size_t j = 0; j < groups[i].value_count; ++j) {
       strncpy(output->kv_lst[i].value[j], groups[i].values[j], MAX_VALUE_SIZE);
       output->kv_lst[i].value[j][MAX_VALUE_SIZE - 1] = '\0';
-    }
+    }*/
   }
+
+  qsort(output->kv_lst, output->count, sizeof(struct mr_out_kv), outcompare);
 
   for (size_t i = 0; i < group_count; ++i) {
     for (size_t k = 0; k < groups[i].value_count; ++k) {
