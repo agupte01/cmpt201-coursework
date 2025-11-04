@@ -40,7 +40,7 @@ struct reduce_task_arg {
   key_group *groups;
   size_t start_idx;
   size_t end_idx;
-  void (*reduce)(const struct mr_out_kv *); 
+  void (*reduce)(const struct mr_out_kv *);
 };
 
 void *map_thread(void *arg) {
@@ -53,13 +53,17 @@ void *map_thread(void *arg) {
 
 void *reduce_thread(void *arg) {
   struct reduce_task_arg *task = (struct reduce_task_arg *)arg;
-  struct mr_out_kv outkv;
+
   for (size_t i = task->start_idx; i < task->end_idx; ++i) {
+    struct mr_out_kv outkv;
     strncpy(outkv.key, task->groups[i].key, MAX_KEY_SIZE);
     outkv.key[MAX_KEY_SIZE - 1] = '\0';
-    size_t len = strlen(task->groups[i].values[0]) + 1;
-    outkv.value = malloc(len);
-    strncpy(outkv.value, task->groups[i].values[0], len);
+    outkv.count = task->groups[i].value_count;
+    outkv.value = malloc(outkv.count * MAX_VALUE_SIZE);
+    for (size_t k = 0; k < outkv.count; ++k) {
+      strncpy(outkv.value[k], task->groups[i].values[k], MAX_VALUE_SIZE);
+      outkv.value[k][MAX_VALUE_SIZE - 1] = '\0';
+    }
     task->reduce(&outkv);
     free(outkv.value);
   }
@@ -148,27 +152,31 @@ int mr_exec(const struct mr_input *input, void (*map)(const struct mr_in_kv *),
   key_group *groups = malloc(intermediate_count * sizeof(key_group));
   size_t group_count = 0;
 
-  size_t i = 0;
-  while (i < intermediate_count) {
-    size_t j = i + 1;
+  idx = 0;
+  while (idx < intermediate_count) {
+    size_t j = idx + 1;
     while (j < intermediate_count &&
-           strncmp(intermediate_buffer[i].key, intermediate_buffer[j].key,
+           strncmp(intermediate_buffer[idx].key, intermediate_buffer[j].key,
                    MAX_KEY_SIZE) == 0) {
       j++;
     }
 
-    groups[group_count].value_count = j - i;
-    strncpy(groups[group_count].key, intermediate_buffer[i].key, MAX_KEY_SIZE);
+    groups[group_count].value_count = j - idx;
+    strncpy(groups[group_count].key, intermediate_buffer[idx].key,
+            MAX_KEY_SIZE);
     groups[group_count].key[MAX_KEY_SIZE - 1] = '\0';
     groups[group_count].values =
         malloc(groups[group_count].value_count * sizeof(char *));
     for (size_t k = 0; k < groups[group_count].value_count; ++k) {
-      groups[group_count].values[k] = intermediate_buffer[i + k].value;
+      size_t len = strlen(intermediate_buffer[idx + k].value) + 1;
+      groups[group_count].values[k] = malloc(len);
+      strncpy(groups[group_count].values[k], intermediate_buffer[idx + k].value,
+              len);
+      ;
     }
     group_count++;
-    i = j;
+    idx = j;
   }
-
 
   size_t reduce_base_chunk = group_count / reducer_count;
   size_t reduce_remainder = group_count % reducer_count;
@@ -177,7 +185,7 @@ int mr_exec(const struct mr_input *input, void (*map)(const struct mr_in_kv *),
   size_t reduce_ends[reducer_count];
 
   size_t reduce_idx = 0;
-  for (size_t i = 0; i < reducer_count; ++i){
+  for (size_t i = 0; i < reducer_count; ++i) {
     reduce_starts[i] = reduce_idx;
     size_t chunk_size = reduce_base_chunk + (i < reduce_remainder ? 1 : 0);
     reduce_ends[i] = reduce_idx + chunk_size;
@@ -186,31 +194,37 @@ int mr_exec(const struct mr_input *input, void (*map)(const struct mr_in_kv *),
 
   pthread_t reducer_threads[reducer_count];
   struct reduce_task_arg reduce_args[reducer_count];
-  for (size_t i = 0 ; i< reducer_count; ++i){
+  for (size_t i = 0; i < reducer_count; ++i) {
     reduce_args[i].groups = groups;
     reduce_args[i].start_idx = reduce_starts[i];
     reduce_args[i].end_idx = reduce_ends[i];
     reduce_args[i].reduce = reduce;
-    if (pthread_create(&reducer_threads[i], NULL, reduce_thread, &reduce_args[i]) != 0) return -1;
+    if (pthread_create(&reducer_threads[i], NULL, reduce_thread,
+                       &reduce_args[i]) != 0)
+      return -1;
   }
-  for (size_t i = 0; i< reducer_count; ++i){
+  for (size_t i = 0; i < reducer_count; ++i) {
     pthread_join(reducer_threads[i], NULL);
   }
 
   output->count = final_count;
   output->kv_lst = calloc(final_count, sizeof(struct mr_out_kv));
-  for (size_t i = 0; i < final_count; ++i){
+  for (size_t i = 0; i < final_count; ++i) {
     strncpy(output->kv_lst[i].key, final_buffer[i].key, MAX_KEY_SIZE);
     output->kv_lst[i].key[MAX_KEY_SIZE - 1] = '\0';
-    size_t len = strlen(final_buffer[i].value) + 1;
-    output->kv_lst[i].value = malloc(len);
-    strncpy(output->kv_lst[i].value, final_buffer[i].value, len);
+    output->kv_lst[i].count = groups[i].value_count;
+    output->kv_lst[i].value = malloc(groups[i].value_count * MAX_VALUE_SIZE);
+    for (size_t j = 0; j < groups[i].value_count; ++j) {
+      strncpy(output->kv_lst[i].value[j], groups[i].values[j], MAX_VALUE_SIZE);
+      output->kv_lst[i].value[j][MAX_VALUE_SIZE - 1] = '\0';
+    }
   }
 
   for (size_t i = 0; i < group_count; ++i) {
+    for (size_t k = 0; k < groups[i].value_count; ++k) {
+      free(groups[i].values[k]);
+    }
     free(groups[i].values);
   }
-  free(groups);
-
   return 0;
 }
