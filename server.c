@@ -109,11 +109,20 @@ int main(int argc, char *argv[]) {
         char buffer[1024];
         int valread = read(sd, buffer, sizeof(buffer));
         if (valread <= 0) {
-          close(sd);
-          client_sockets[i] = 0;
-          total_connected_clients--;
-          printf("Client disconnected from slot %d, total: %d\n", i,
-                 total_connected_clients);
+          client_finished[i] = 1;
+          printf("Client finished flags: ");
+          for (int k = 0; k < max_clients; k++) {
+            if (client_sockets[k] > 0)
+              printf("%d:%d ", k, client_finished[k]);
+          }
+          printf("\n");
+          if (sd > 0) {
+            close(sd);
+            client_sockets[i] = 0;
+            total_connected_clients--;
+            printf("Client disconnected from slot %d, total: %d\n", i,
+                   total_connected_clients);
+          }
           continue;
         } else if (valread == 0) {
           close(sd);
