@@ -9,6 +9,7 @@
 #include <time.h>
 #include <unistd.h>
 #define MAX_CLIENTS 100
+#define SHUTDOWN_WAIT_TIMEOUT_SEC 10
 
 int main(int argc, char *argv[]) {
   if (argc != 3) {
@@ -63,6 +64,7 @@ int main(int argc, char *argv[]) {
   int leftover_len[MAX_CLIENTS] = {0};
 
   int shutting_down = 0;
+  time_t shutdown_start_time = 0;
   while (1) {
     FD_ZERO(&readfds);
     FD_SET(server_fd, &readfds);
@@ -76,7 +78,8 @@ int main(int argc, char *argv[]) {
         max_sd = sd;
     }
 
-    activity = select(max_sd + 1, &readfds, NULL, NULL, NULL);
+    struct timeval timeout = {1, 0};
+    activity = select(max_sd + 1, &readfds, NULL, NULL, &timeout);
     if (activity < 0) {
       perror("select error");
       exit(EXIT_FAILURE);
@@ -123,13 +126,6 @@ int main(int argc, char *argv[]) {
             printf("Client disconnected from slot %d, total: %d\n", i,
                    total_connected_clients);
           }
-          continue;
-        } else if (valread == 0) {
-          close(sd);
-          client_sockets[i] = 0;
-          total_connected_clients--;
-          printf("client disconnected from slot %d, total: %d\n", i,
-                 total_connected_clients);
           continue;
         }
         char recvbuf[2048];
@@ -205,6 +201,7 @@ int main(int argc, char *argv[]) {
               if (client_sockets[k] > 0) {
                 if (client_finished[k] == 0) {
                   all_finished = 0;
+                  break;
                 } else {
                   finished_count++;
                 }
@@ -215,6 +212,7 @@ int main(int argc, char *argv[]) {
 
             if (all_finished && total_connected_clients > 0 && !shutting_down) {
               shutting_down = 1;
+              shutdown_start_time = time(NULL);
               printf("All clients finished. Terminating.\n");
               uint8_t type1_msg = 1;
               for (int k = 0; k < max_clients; k++) {
@@ -252,6 +250,8 @@ int main(int argc, char *argv[]) {
             close(client_sockets[i]);
             client_sockets[i] = 0;
             total_connected_clients--;
+            client_finished[i] = 0;
+            client_shutdown[i] = 0;
             printf("client %d disconnected during shutdown, total: %d\n", i,
                    total_connected_clients);
           } else {
@@ -263,6 +263,19 @@ int main(int argc, char *argv[]) {
         printf("All clients disconnected. shutting server.\n");
         close(server_fd);
         exit(EXIT_SUCCESS);
+      } else {
+        time_t now = time(NULL);
+        if (now - shutdown_start_time > SHUTDOWN_WAIT_TIMEOUT_SEC) {
+          printf("shutdown wait timeout reached. forcing server shutdown.\n");
+          for (int i = 0; i < max_clients; i++) {
+            if (client_sockets[i] > 0) {
+              close(client_sockets[i]);
+              client_sockets[i] = 0;
+            }
+          }
+          close(server_fd);
+          exit(EXIT_FAILURE);
+        }
       }
     }
   }
