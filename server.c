@@ -183,8 +183,17 @@ int main(int argc, char *argv[]) {
               uint8_t type1_msg = 1;
               for (int k = 0; k < max_clients; k++) {
                 if (client_sockets[k] > 0) {
-                  write(client_sockets[k], &type1_msg, 1);
+                  ssize_t w = write(client_sockets[k], &type1_msg, 1);
+                  if (w != 1) {
+                    perror("write type 1 message");
+                  }
+                }
+              }
+
+              for (int k = 0; k < max_clients; k++) {
+                if (client_sockets[k] > 0) {
                   close(client_sockets[k]);
+                  client_sockets[k] = 0;
                 }
               }
               close(server_fd);
