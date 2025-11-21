@@ -38,20 +38,21 @@ void *receiver_thread(void *arg) {
   while (1) {
     uint8_t recv_buf[1024];
     ssize_t rlen = read(params->sockfd, recv_buf, sizeof(recv_buf));
-    if (rlen <= 0) {
+    if (rlen < 0) {
+      perror("read error");
+      break;
+    }
+    if (rlen == 0) {
       printf("server closed connection or error. Exiting\n");
-      fclose(logfile);
-      close(params->sockfd);
-      exit(EXIT_SUCCESS);
+      break;
     }
 
     uint8_t msg_type = recv_buf[0];
     if (msg_type == 1) {
       printf("Recieved type 1 (shutdown) from server. Exiting\n");
       fprintf(logfile, "Received type 1 from server. Exiting\n");
-      fclose(logfile);
-      close(params->sockfd);
-      exit(EXIT_SUCCESS);
+      fflush(logfile);
+      break;
     } else if (msg_type == 0 && rlen >= 7) {
       uint32_t sender_ip;
       uint16_t sender_port;
@@ -74,6 +75,7 @@ void *receiver_thread(void *arg) {
     }
   }
   fclose(logfile);
+  close(params->sockfd);
   pthread_exit(NULL);
 }
 

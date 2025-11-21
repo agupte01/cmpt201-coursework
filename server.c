@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 #define MAX_CLIENTS 100
 
@@ -27,6 +28,7 @@ int main(int argc, char *argv[]) {
   fd_set readfds;
 
   int client_finished[MAX_CLIENTS] = {0};
+  int client_shutdown[MAX_CLIENTS] = {0};
   int total_connected_clients = 0;
   server_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (server_fd < 0) {
@@ -59,6 +61,8 @@ int main(int argc, char *argv[]) {
 
   char leftover[MAX_CLIENTS][1024] = {{0}};
   int leftover_len[MAX_CLIENTS] = {0};
+
+  int shutting_down = 0;
   while (1) {
     FD_ZERO(&readfds);
     FD_SET(server_fd, &readfds);
@@ -78,7 +82,7 @@ int main(int argc, char *argv[]) {
       exit(EXIT_FAILURE);
     }
 
-    if (FD_ISSET(server_fd, &readfds)) {
+    if (FD_ISSET(server_fd, &readfds) && !shutting_down) {
       new_socket =
           accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen);
 
@@ -111,6 +115,13 @@ int main(int argc, char *argv[]) {
           printf("Client disconnected from slot %d, total: %d\n", i,
                  total_connected_clients);
           continue;
+        } else if (valread == 0) {
+          close(sd);
+          client_sockets[i] = 0;
+          total_connected_clients--;
+          printf("client disconnected from slot %d, total: %d\n", i,
+                 total_connected_clients);
+          continue;
         }
         char recvbuf[2048];
         int rcvlen = leftover_len[i];
@@ -124,7 +135,7 @@ int main(int argc, char *argv[]) {
           if (rcvlen - start < 1)
             break;
 
-          uint8_t msg_type = (uint8_t)recvbuf[start];
+          uint8_t msg_type = recvbuf[start];
 
           if (msg_type == 0) {
 
@@ -136,13 +147,17 @@ int main(int argc, char *argv[]) {
             int msg_data_len = end - (start + 1) + 1;
 
             uint8_t out_buffer[1024];
-            size_t out_len = 0;
+            size_t out_len = 1;
             out_buffer[0] = 0;
-            out_len = 1;
 
             struct sockaddr_in peer_addr;
             socklen_t peer_addrlen = sizeof(peer_addr);
-            getpeername(sd, (struct sockaddr *)&peer_addr, &peer_addrlen);
+            if (getpeername(sd, (struct sockaddr *)&peer_addr, &peer_addrlen) <
+                0) {
+              perror("getpeername");
+              start = end + 1;
+              continue;
+            }
             uint32_t sender_ip = peer_addr.sin_addr.s_addr;
             uint16_t sender_port = peer_addr.sin_port;
             memcpy(out_buffer + out_len, &sender_ip, sizeof(sender_ip));
@@ -156,14 +171,25 @@ int main(int argc, char *argv[]) {
             for (int j = 0; j < max_clients; j++) {
               int cli_sd = client_sockets[j];
               if (cli_sd > 0) {
-                write(cli_sd, out_buffer, out_len);
+                ssize_t w = write(cli_sd, out_buffer, out_len);
+                if (w != (ssize_t)out_len) {
+                  perror("write message to client");
+                }
               }
             }
             start = end + 1;
           } else if (msg_type == 1) {
             client_finished[i] = 1;
+            if (!client_shutdown[i]) {
+              shutdown(client_sockets[i], SHUT_WR);
+              client_shutdown[i] = 1;
+            }
             printf("Client %d sent type 1\n", i);
 
+            if (!client_shutdown[i]) {
+              shutdown(client_sockets[i], SHUT_WR);
+              client_shutdown[i] = 1;
+            }
             int all_finished = 1;
             int finished_count = 0;
             for (int k = 0; k < max_clients; k++) {
@@ -178,7 +204,8 @@ int main(int argc, char *argv[]) {
             printf("Finished: %d / %d\n", finished_count,
                    total_connected_clients);
 
-            if (all_finished && total_connected_clients > 0) {
+            if (all_finished && total_connected_clients > 0 && !shutting_down) {
+              shutting_down = 1;
               printf("All clients finished. Terminating.\n");
               uint8_t type1_msg = 1;
               for (int k = 0; k < max_clients; k++) {
@@ -187,17 +214,10 @@ int main(int argc, char *argv[]) {
                   if (w != 1) {
                     perror("write type 1 message");
                   }
+                  shutdown(client_sockets[k], SHUT_WR);
+                  client_shutdown[k] = 1;
                 }
               }
-
-              for (int k = 0; k < max_clients; k++) {
-                if (client_sockets[k] > 0) {
-                  close(client_sockets[k]);
-                  client_sockets[k] = 0;
-                }
-              }
-              close(server_fd);
-              exit(EXIT_SUCCESS);
             }
             start += 1;
           } else {
@@ -210,6 +230,30 @@ int main(int argc, char *argv[]) {
         } else {
           leftover_len[i] = 0;
         }
+      }
+    }
+    if (shutting_down) {
+      int any_connected = 0;
+      for (int i = 0; i < max_clients; i++) {
+        if (client_sockets[i] > 0) {
+          char tmp_buf[1];
+          ssize_t r =
+              recv(client_sockets[i], tmp_buf, 1, MSG_PEEK | MSG_DONTWAIT);
+          if (r == 0) {
+            close(client_sockets[i]);
+            client_sockets[i] = 0;
+            total_connected_clients--;
+            printf("client %d disconnected during shutdown, total: %d\n", i,
+                   total_connected_clients);
+          } else {
+            any_connected = 1;
+          }
+        }
+      }
+      if (!any_connected) {
+        printf("All clients disconnected. shutting server.\n");
+        close(server_fd);
+        exit(EXIT_SUCCESS);
       }
     }
   }
