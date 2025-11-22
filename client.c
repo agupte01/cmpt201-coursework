@@ -32,7 +32,7 @@ void *receiver_thread(void *arg) {
   FILE *logfile = fopen(params->log_file_path, "w");
 
   if (!logfile) {
-    perror("fopen lof file");
+    perror("fopen log file");
     pthread_exit(NULL);
   }
 
@@ -42,7 +42,9 @@ void *receiver_thread(void *arg) {
     uint8_t recv_buf[1024];
     ssize_t rlen = read(params->sockfd, recv_buf, sizeof(recv_buf));
     if (rlen < 0) {
-      perror("read error");
+      if (*(params->done)) {
+        break;
+      }
       break;
     }
     if (rlen == 0) {
@@ -98,8 +100,9 @@ void *receiver_thread(void *arg) {
         }
         message[content_len > 0 ? content_len : 0] = '\0';
 
-        printf("%-15s%-10u%s", ip_str, port_num, message);
-        fprintf(logfile, "%-15s%-10u%s", ip_str, port_num, message);
+        printf("%-15s%-10u%s\n", ip_str, port_num, message);
+        fflush(stdout);
+        fprintf(logfile, "%-15s%-10u%s\n", ip_str, port_num, message);
         fflush(logfile);
         pos = newline_pos + 1;
       } else {
@@ -136,6 +139,9 @@ int main(int argc, char *argv[]) {
     perror("socket");
     exit(EXIT_FAILURE);
   }
+  struct timeval tv;
+  tv.tv_sec = 3;
+  setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
   struct sockaddr_in server_addr;
   server_addr.sin_family = AF_INET;
@@ -201,6 +207,8 @@ int main(int argc, char *argv[]) {
   }
   printf("Sent type 1 (shutdown) message to server.\n");
 
+  done = 1;
+  shutdown(sockfd, SHUT_WR);
   pthread_join(recv_tid, NULL);
 
   close(sockfd);
