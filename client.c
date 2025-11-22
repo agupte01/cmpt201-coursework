@@ -152,7 +152,7 @@ int main(int argc, char *argv[]) {
     exit(EXIT_FAILURE);
   }
 
-  printf("Connected to server %s%d\n", server_ip, port);
+  printf("Connected to server %s:%d\n", server_ip, port);
 
   volatile int done = 0;
   ReceiverArgs recv_args = {sockfd, log_file_path, &done};
