@@ -29,7 +29,7 @@ typedef struct {
 
 void *receiver_thread(void *arg) {
   ReceiverArgs *params = (ReceiverArgs *)arg;
-  FILE *logfile = fopen(params->log_file_path, "a");
+  FILE *logfile = fopen(params->log_file_path, "w");
 
   if (!logfile) {
     perror("fopen lof file");
@@ -82,15 +82,15 @@ void *receiver_thread(void *arg) {
 
         uint32_t sender_ip;
         uint16_t sender_port;
-        memcpy(&sender_ip, recv_buf + 1, sizeof(sender_ip));
-        memcpy(&sender_port, recv_buf + 5, sizeof(sender_port));
+        memcpy(&sender_ip, buffer + pos + 1, sizeof(sender_ip));
+        memcpy(&sender_port, buffer + pos + 5, sizeof(sender_port));
         struct in_addr ip_addr;
         ip_addr.s_addr = sender_ip;
         char ip_str[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &ip_addr, ip_str, sizeof(ip_str));
         unsigned int port_num = ntohs(sender_port);
 
-        int content_start = newline_pos + 7;
+        int content_start = pos + 7;
         int content_len = newline_pos - content_start;
         char message[1024];
         if (content_len > 0 && content_len < 1024) {

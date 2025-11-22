@@ -184,7 +184,12 @@ int main(int argc, char *argv[]) {
           } else if (msg_type == 1) {
             client_finished[i] = 1;
             printf("Client %d sent type 1\n", i);
+            fflush(stdout);
 
+            start += 1;
+            if (start < rcvlen && recvbuf[start] == '\n') {
+              start += 1;
+            }
             int all_finished = 1;
             int finished_count = 0;
             for (int k = 0; k < max_clients; k++) {
@@ -205,11 +210,11 @@ int main(int argc, char *argv[]) {
               shutdown_start_time = time(NULL);
               printf("All clients finished.sending type 1 to all clients.\n");
               fflush(stdout);
-              uint8_t type1_msg = 1;
+              uint8_t type1_msg[2] = {1, '\n'};
               for (int k = 0; k < max_clients; k++) {
                 if (client_sockets[k] > 0) {
-                  ssize_t w = write(client_sockets[k], &type1_msg, 1);
-                  printf("sent type 1 to client %d 9socket %d), write "
+                  ssize_t w = write(client_sockets[k], &type1_msg, 2);
+                  printf("sent type 1 to client %d (socket %d), write "
                          "returned: %zd\n",
                          k, client_sockets[k], w);
                   fflush(stdout);
@@ -218,10 +223,9 @@ int main(int argc, char *argv[]) {
                   }
                 }
               }
-              printf("DOne sending type 1 to all clients.\n");
+              printf("Done sending type 1 to all clients.\n");
               fflush(stdout);
             }
-            start += 1;
           } else {
             start += 1;
           }
